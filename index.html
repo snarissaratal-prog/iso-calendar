@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ISO Planning Calendar (V1.7 - Final Build)</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style>
+        .status-pending { background-color: #FEF3C7; color: #92400E; border-left: 4px solid #F59E0B; }
+        .status-delayed { background-color: #FEE2E2; color: #991B1B; border-left: 4px solid #EF4444; }
+        .status-done { background-color: #D1FAE5; color: #065F46; border-left: 4px solid #10B981; }
+        .status-cancelled { background-color: #E5E7EB; color: #374151; border-left: 4px solid #6B7280; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans p-6">
+
+    <div class="max-w-6xl mx-auto bg-white rounded-xl shadow-md p-6">
+        <div class="flex justify-between items-center mb-6 border-b pb-4">
+            <div>
+                <h1 class="text-2xl font-bold text-blue-900">🗓️ ISO Action Plan Calendar</h1>
+                <p class="text-sm text-gray-500">ระบบติดตามแผนงานเวอร์ชันใช้งานจริง (เสถียรสูงสุด)</p>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="fetchTasks()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-lg font-semibold text-sm border">🔄 รีเฟรชหน้าจอ</button>
+                <button onclick="openModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold shadow transition-all">+ เพิ่มงานใหม่</button>
+            </div>
+        </div>
+
+        <div class="bg-blue-50 p-4 rounded-lg mb-6 flex flex-col md:flex-row gap-3 items-center">
+            <span class="text-sm font-medium text-blue-800 whitespace-nowrap">Google Apps Script URL:</span>
+            <input type="text" id="scriptUrl" placeholder="วางลิงก์ที่ลงท้ายด้วย /exec ตรงนี้" class="flex-1 p-2 border rounded bg-white text-sm w-full">
+            <button onclick="saveConfig()" class="bg-blue-800 text-white px-4 py-2 text-sm rounded hover:bg-blue-950 whitespace-nowrap">เชื่อมต่อระบบ</button>
+        </div>
+
+        <div class="mb-4 text-xl font-bold text-center text-gray-700" id="currentMonthYear"></div>
+        <div class="grid grid-cols-7 gap-2 bg-gray-200 p-2 rounded-t-lg font-semibold text-center text-sm text-gray-600">
+            <div>อา.</div><div>จ.</div><div>อ.</div><div>พ.</div><div>พฤ.</div><div>ศ.</div><div>ส.</div>
+        </div>
+        <div id="calendarDays" class="grid grid-cols-7 gap-2 border-x border-b p-2 bg-white rounded-b-lg min-h-[500px]"></div>
+    </div>
+
+    <div id="taskModal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl">
+            <h3 class="text-lg font-bold mb-4 text-blue-900">📝 เพิ่มแผนงาน ISO ใหม่</h3>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1">ชื่องาน / กิจกรรม ISO</label>
+                    <input type="text" id="taskTitle" class="w-full p-2 border rounded-lg">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">ผู้รับผิดชอบ</label>
+                    <input type="text" id="taskAssignee" class="w-full p-2 border rounded-lg">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">วันที่กำหนดเสร็จ</label>
+                    <input type="date" id="taskDueDate" class="w-full p-2 border rounded-lg">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">สถานะเริ่มต้น</label>
+                    <select id="taskStatus" class="w-full p-2 border rounded-lg">
+                        <option value="รอดำเนินการ">รอดำเนินการ</option>
+                        <option value="ล่าช้า">ล่าช้า</option>
+                        <option value="ดำเนินการจบแล้ว">ดำเนินการจบแล้ว</option>
+                        <option value="ยกเลิก">ยกเลิก</option>
+                    </select>
+                </div>
+            </div>
+            <div class="mt-6 flex justify-end gap-2">
+                <button onclick="closeModal()" class="px-4 py-2 border rounded-lg text-gray-600 hover:bg-gray-100">ยกเลิก</button>
+                <button onclick="submitTask()" id="btnSubmit" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">บันทึกลงระบบ</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let tasks = [];
+        let currentYear, currentMonth;
+
+        window.onload = function() {
+            const now = new Date();
+            currentYear = now.getFullYear();
+            currentMonth = now.getMonth();
+
+            const savedUrl = localStorage.getItem('iso_script_url');
+            if (savedUrl) {
+                document.getElementById('scriptUrl').value = savedUrl;
+                fetchTasks();
+            } else {
+                renderCalendar();
+            }
+        }
+
+        function saveConfig() {
+            const url = document.getElementById('scriptUrl').value.trim();
+            if(!url) return alert('กรุณากรอกลิงก์ก่อนครับ');
+            localStorage.setItem('iso_script_url', url);
+            fetchTasks();
+        }
+
+        function fetchTasks() {
+            const url = localStorage.getItem('iso_script_url');
+            if (!url) return;
+
+            const oldScript = document.getElementById('jsonpScript');
+            if(oldScript) oldScript.remove();
+
+            const script = document.createElement('script');
+            script.id = 'jsonpScript';
+            // บังคับให้ข้ามตัวล็อกของเครือข่ายโฮสติ้งด้วยเครื่องหมายคำถามแคชเคลียร์
+            script.src = url + "?ts=" + Date.now();
+            document.body.appendChild(script);
+        }
+
+        // ปลุกฟังก์ชันขึ้นมาให้อยู่บนสุดของระบบ (Global Window Object) เพื่อไม่ให้นิ่งเงียบ
+        window.handleData = function(data) {
+            if (Array.isArray(data)) {
+                tasks = data;
+                renderCalendar();
+            }
+        }
+
+        function renderCalendar() {
+            const daysContainer = document.getElementById('calendarDays');
+            const monthYearLabel = document.getElementById('currentMonthYear');
+            if(!daysContainer) return;
+            daysContainer.innerHTML = '';
+            
+            const monthNames = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
+            monthYearLabel.innerText = `${monthNames[currentMonth]} ${currentYear + 543}`;
+
+            const firstDayIndex = new Date(currentYear, currentMonth, 1).getDay();
+            const lastDay = new Date(currentYear, currentMonth + 1, 0).getDate();
+
+            for (let i = 0; i < firstDayIndex; i++) {
+                const emptyDiv = document.createElement('div');
+                emptyDiv.className = "bg-gray-50 border border-gray-100 p-2 min-h-[100px]";
+                daysContainer.appendChild(emptyDiv);
+            }
+
+            for (let day = 1; day <= lastDay; day++) {
+                const dayDiv = document.createElement('div');
+                dayDiv.className = "bg-white border border-gray-200 p-1 min-h-[100px] flex flex-col justify-between";
+                
+                const dateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                dayDiv.innerHTML = `<span class="text-xs font-bold text-gray-400">${day}</span><div class="space-y-1 mt-1 overflow-y-auto max-h-[85px]" id="tasks-${dateStr}"></div>`;
+                daysContainer.appendChild(dayDiv);
+
+                if (Array.isArray(tasks)) {
+                    const dayTasks = tasks.filter(t => t.dueDate === dateStr);
+                    dayTasks.forEach(task => {
+                        const taskEl = document.createElement('div');
+                        let statusClass = 'status-pending';
+                        if(task.status === 'ล่าช้า') statusClass = 'status-delayed';
+                        if(task.status === 'ดำเนินการจบแล้ว') statusClass = 'status-done';
+                        if(task.status === 'ยกเลิก') statusClass = 'status-cancelled';
+
+                        taskEl.className = `${statusClass} p-1 text-[11px] rounded shadow-sm cursor-pointer hover:scale-105 transition-all`;
+                        taskEl.innerHTML = `<strong>${task.title}</strong><br>👤 ${task.assignee}`;
+                        taskEl.onclick = () => changeStatus(task.id, task.status);
+                        
+                        const targetBox = dayDiv.querySelector(`#tasks-${dateStr}`);
+                        if(targetBox) targetBox.appendChild(taskEl);
+                    });
+                }
+            }
+        }
+
+        function openModal() { document.getElementById('taskModal').classList.remove('hidden'); }
+        function closeModal() { document.getElementById('taskModal').classList.add('hidden'); }
+
+        function submitTask() {
+            const url = localStorage.getItem('iso_script_url');
+            const btn = document.getElementById('btnSubmit');
+
+            const payload = {
+                action: "add",
+                id: 'ISO-' + Date.now(),
+                title: document.getElementById('taskTitle').value.trim(),
+                assignee: document.getElementById('taskAssignee').value.trim(),
+                dueDate: document.getElementById('taskDueDate').value,
+                status: document.getElementById('taskStatus').value
+            };
+
+            if(!payload.title || !payload.dueDate) return alert('กรุณากรอกข้อมูลให้ครบถ้วนครับ');
+
+            btn.innerText = "กำลังส่งข้อมูล...";
+            btn.disabled = true;
+
+            fetch(url, { method: 'POST', body: JSON.stringify(payload) })
+                .then(() => {
+                    btn.innerText = "บันทึกลงระบบ";
+                    btn.disabled = false;
+                    closeModal();
+                    setTimeout(fetchTasks, 1500); 
+                }).catch(err => {
+                    console.error(err);
+                    btn.innerText = "บันทึกลงระบบ";
+                    btn.disabled = false;
+                    closeModal();
+                    setTimeout(fetchTasks, 1500);
+                });
+        }
+
+        function changeStatus(id, currentStatus) {
+            const nextStatusMap = {
+                "รอดำเนินการ": "ดำเนินการจบแล้ว",
+                "ดำเนินการจบแล้ว": "ล่าช้า",
+                "ล่าช้า": "ยกเลิก",
+                "ยกเลิก": "รอดำเนินการ"
+            };
+            const newStatus = nextStatusMap[currentStatus];
+
+            if(confirm(`ต้องการเปลี่ยนสถานะงานนี้เป็น "${newStatus}" ใช่หรือไม่?`)) {
+                const url = localStorage.getItem('iso_script_url');
+                if (url) {
+                    const payload = { action: "update", id: id, status: newStatus };
+                    fetch(url, { method: 'POST', body: JSON.stringify(payload) })
+                        .then(() => {
+                            setTimeout(fetchTasks, 1000);
+                        });
+                }
+            }
+        }
+    </script>
+</body>
+</html>
